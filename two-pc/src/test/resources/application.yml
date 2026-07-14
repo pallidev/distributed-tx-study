@@ -4,7 +4,7 @@ spring:
   jpa:
     open-in-view: false
 
-# main(로컬 실행)은 H2 XA. 테스트(@DynamicPropertySource)는 MySQL(Testcontainers) XA 로 덮어쓴다.
+# main(H2) 기본값 — 테스트는 @DynamicPropertySource 로 MySQL XA 덮어쓰기
 datasource:
   legacy:
     xa-class: org.h2.jdbcx.JdbcDataSource
@@ -15,6 +15,11 @@ datasource:
   user: sa
   password: ""
 
+# 원인 파악용: Atomikos 분산 TX 흐름 + Hibernate SQL 전부 로그
 logging:
   level:
-    com.atomikos: INFO
+    com.atomikos: TRACE
+    org.hibernate.SQL: DEBUG
+    org.hibernate.orm.jdbc.bind: TRACE
+    org.springframework.orm.jpa: DEBUG
+    org.springframework.transaction: DEBUG

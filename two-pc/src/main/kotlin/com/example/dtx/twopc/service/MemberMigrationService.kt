@@ -31,15 +31,15 @@ class MemberMigrationService(
 
     @Transactional
     fun createMember(email: String, name: String) {
-        newRepo.save(NewMember(email = email, name = name))
-        legacyRepo.save(LegacyMember(email = email, name = name))
+        newRepo.saveAndFlush(NewMember(email = email, name = name))
+        legacyRepo.saveAndFlush(LegacyMember(email = email, name = name))
         log.info("[2PC] 회원 동기화 완료 (신규+기존 모두 커밋) email={}", email)
     }
 
     /** legacy 저장 직전 실패 → 양쪽 롤백 시뮬레이션. */
     @Transactional
     fun createMemberThenFail(email: String, name: String) {
-        newRepo.save(NewMember(email = email, name = name))
+        newRepo.saveAndFlush(NewMember(email = email, name = name))
         log.info("[2PC] 신규 DB 저장 후 legacy 저장 전 예외 → 전체 롤백 email={}", email)
         throw IllegalStateException("2PC: legacy DB 저장 실패 시뮬레이션")
     }

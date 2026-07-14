@@ -17,8 +17,17 @@ dependencies {
     implementation("com.atomikos:transactions-jdbc:6.0.1")
     implementation("org.jetbrains.kotlin:kotlin-reflect")
     runtimeOnly("com.h2database:h2")
+    runtimeOnly("com.mysql:mysql-connector-j")
+    testImplementation("org.springframework.boot:spring-boot-starter-test")
+    testImplementation("org.springframework.boot:spring-boot-testcontainers")
+    testImplementation("org.testcontainers:mysql:1.20.4")
+    testImplementation("org.testcontainers:junit-jupiter:1.20.4")
 }
 
 allOpen {
     annotation("jakarta.persistence.Entity")
+}
+
+tasks.withType<Test> {
+    useJUnitPlatform()
 }

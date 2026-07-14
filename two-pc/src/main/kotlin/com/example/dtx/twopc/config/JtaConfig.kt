@@ -1,10 +1,10 @@
 package com.example.dtx.twopc.config
 
-import com.atomikos.icatch.jta.UserTransactionImp
 import com.atomikos.icatch.jta.UserTransactionManager
 import com.atomikos.jdbc.AtomikosDataSourceBean
 import jakarta.transaction.TransactionManager
-import jakarta.transaction.UserTransaction
+import org.springframework.beans.factory.annotation.Value
+import org.springframework.boot.jpa.EntityManagerFactoryBuilder
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
@@ -18,64 +18,76 @@ import java.util.Properties
 import javax.sql.DataSource
 
 /**
- * 2PC 코디네이터(Atomikos/JTA) + 다중 DataSource/EMF 설정.
- *  - legacy/new 두 XA DataSource 를 Atomikos 가 관리
- *  - 각 EMF 는 JTA 에 참여 (Hibernate JTA platform = Atomikos)
- *  - @Transactional 하나로 양쪽 DB 쓰기가 원자적으로 묶임 = 2PC
+ * 2PC 코디네이터(Atomikos/JTA) + 다중 DataSource/EMF.
+ *
+ * 핵심: EntityManagerFactoryBuilder.jta(true) 로 Hibernate 가 JTA 글로벌 TX 에 참여해야
+ *  persist → flush → XA branch enlist → commit 흐름이 일어난다.
+ *  (LocalContainerEntityManagerFactoryBean 직접 생성 시 jta(true) 가 빠지면 insert 자체가 안 된다.)
  */
 @Configuration
 @EnableTransactionManagement
-class JtaConfig {
-
-    private fun h2Xa(url: String, name: String): DataSource = AtomikosDataSourceBean().apply {
+class JtaConfig(
+    @Value("\${datasource.legacy.xa-class}") private val legacyXaClass: String,
+    @Value("\${datasource.legacy.url}") private val legacyUrl: String,
+    @Value("\${datasource.new.xa-class}") private val newXaClass: String,
+    @Value("\${datasource.new.url}") private val newUrl: String,
+    @Value("\${datasource.user:sa}") private val user: String,
+    @Value("\${datasource.password:}") private val password: String,
+    @Value("\${hibernate.hbm2ddl.auto:update}") private val hbm2ddl: String,
+) {
+    private fun xa(url: String, name: String, xaClass: String): DataSource = AtomikosDataSourceBean().apply {
         uniqueResourceName = name
-        xaDataSourceClassName = "org.h2.jdbcx.JdbcDataSource"
+        xaDataSourceClassName = xaClass
         maxPoolSize = 5
         xaProperties = Properties().apply {
             setProperty("URL", url)
-            setProperty("user", "sa")
-            setProperty("password", "")
+            setProperty("user", user)
+            setProperty("password", password)
+            // MySQL Connector/J XA: 같은 XID(글로벌 TX)는 항상 같은 physical connection 으로 라우팅
+            setProperty("pinGlobalTxToPhysicalConnection", "true")
         }
     }
 
     @Bean(name = ["legacyDataSource"])
-    fun legacyDataSource(): DataSource = h2Xa("jdbc:h2:mem:legacy;DB_CLOSE_DELAY=-1;MODE=MySQL", "legacy")
+    fun legacyDataSource(): DataSource = xa(legacyUrl, "legacy", legacyXaClass)
 
     @Bean(name = ["newDataSource"])
-    fun newDataSource(): DataSource = h2Xa("jdbc:h2:mem:newdb;DB_CLOSE_DELAY=-1;MODE=MySQL", "newdb")
+    fun newDataSource(): DataSource = xa(newUrl, "newdb", newXaClass)
 
-    private fun emf(ds: DataSource, unit: String, pkg: String): LocalContainerEntityManagerFactoryBean =
-        LocalContainerEntityManagerFactoryBean().apply {
-            dataSource = ds
-            setPackagesToScan(pkg)
-            persistenceUnitName = unit
-            jpaVendorAdapter = HibernateJpaVendorAdapter()
-            setJpaProperties(
-                Properties().apply {
-                    setProperty("hibernate.transaction.jta.platform", "Atomikos")
-                    setProperty("hibernate.hbm2ddl.auto", "update")
-                },
-            )
-        }
+    // 다중 DataSource 라 Boot JPA auto-config 가 EntityManagerFactoryBuilder 빈을 안 만들어 주므로 직접 생성.
+    @Bean
+    @Primary
+    fun entityManagerFactoryBuilder(): EntityManagerFactoryBuilder =
+        EntityManagerFactoryBuilder(HibernateJpaVendorAdapter(), { mutableMapOf<String, Any>() }, null)
 
     @Primary
     @Bean(name = ["legacyEntityManagerFactory"])
-    fun legacyEntityManagerFactory(): LocalContainerEntityManagerFactoryBean =
-        emf(legacyDataSource(), "legacy", "com.example.dtx.twopc.domain.legacy")
+    fun legacyEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+        builder
+            .dataSource(legacyDataSource())
+            .packages("com.example.dtx.twopc.domain.legacy")
+            .persistenceUnit("legacy")
+            .jta(true) // ★ Hibernate 가 JTA 글로벌 TX 에 참여
+            .properties(mapOf("hibernate.hbm2ddl.auto" to hbm2ddl))
+            .build()
 
     @Bean(name = ["newEntityManagerFactory"])
-    fun newEntityManagerFactory(): LocalContainerEntityManagerFactoryBean =
-        emf(newDataSource(), "new", "com.example.dtx.twopc.domain.newdb")
+    fun newEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+        builder
+            .dataSource(newDataSource())
+            .packages("com.example.dtx.twopc.domain.newdb")
+            .persistenceUnit("new")
+            .jta(true) // ★
+            .properties(mapOf("hibernate.hbm2ddl.auto" to hbm2ddl))
+            .build()
 
     @Bean(initMethod = "init", destroyMethod = "close")
     fun atomikosTransactionManager(): UserTransactionManager = UserTransactionManager().apply { setTransactionTimeout(300) }
 
     @Bean
-    fun transactionManager(utm: UserTransactionManager): PlatformTransactionManager =
-        JtaTransactionManager(utm, utm)
+    fun transactionManager(utm: UserTransactionManager): PlatformTransactionManager = JtaTransactionManager(utm, utm)
 }
 
-/** legacy DB용 JPA Repository → legacyEntityManagerFactory + JTA transactionManager */
 @Configuration
 @EnableJpaRepositories(
     basePackages = ["com.example.dtx.twopc.repository.legacy"],
@@ -84,7 +96,6 @@ class JtaConfig {
 )
 class LegacyJpaConfig
 
-/** new DB용 JPA Repository → newEntityManagerFactory + JTA transactionManager */
 @Configuration
 @EnableJpaRepositories(
     basePackages = ["com.example.dtx.twopc.repository.newdb"],
