@@ -1,4 +1,4 @@
-package com.example.dtx.saga.domain.legacy
+package com.example.dtx.saga.domain.profile
 
 import jakarta.persistence.Entity
 import jakarta.persistence.GeneratedValue
@@ -6,10 +6,9 @@ import jakarta.persistence.Id
 import jakarta.persistence.Table
 
 @Entity
-@Table(name = "member")
-class LegacyMember(
+@Table(name = "member_profile")
+class MemberProfile(
     @Id @GeneratedValue
     var id: Long? = null,
-    var email: String,
     var name: String,
 )

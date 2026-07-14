@@ -2,6 +2,7 @@ package com.example.dtx.saga.config
 
 import jakarta.persistence.EntityManagerFactory
 import org.springframework.beans.factory.annotation.Qualifier
+import org.springframework.boot.jpa.EntityManagerFactoryBuilder
 import org.springframework.context.annotation.Bean
 import org.springframework.context.annotation.Configuration
 import org.springframework.context.annotation.Primary
@@ -15,8 +16,8 @@ import java.util.Properties
 import javax.sql.DataSource
 
 /**
- * Saga 는 JTA(2PC) 없이 각 DB 마다 독립 로컬 트랜잭션 매니저를 둔다.
- * Orchestrator(MemberMigrationSaga) 가 단계별로 호출하고, 실패 시 보상 트랜잭션을 직접 호출한다.
+ * Saga 는 JTA(2PC) 없이 각 DB 마다 독립 로컬 트랜잭션 매니저.
+ * profile / contact 두 신규 DB 각각 자체 TM. Orchestrator 가 단계별로 호출 + 보상.
  */
 @Configuration
 class PersistenceConfig {
@@ -28,55 +29,61 @@ class PersistenceConfig {
         password = ""
     }
 
-    @Bean(name = ["legacyDataSource"])
+    @Bean(name = ["profileDataSource"])
     @Primary
-    fun legacyDataSource(): DataSource = h2("jdbc:h2:mem:legacy;DB_CLOSE_DELAY=-1;MODE=MySQL")
+    fun profileDataSource(): DataSource = h2("jdbc:h2:mem:profile;DB_CLOSE_DELAY=-1;MODE=MySQL")
 
-    @Bean(name = ["newDataSource"])
-    fun newDataSource(): DataSource = h2("jdbc:h2:mem:newdb;DB_CLOSE_DELAY=-1;MODE=MySQL")
+    @Bean(name = ["contactDataSource"])
+    fun contactDataSource(): DataSource = h2("jdbc:h2:mem:contact;DB_CLOSE_DELAY=-1;MODE=MySQL")
 
-    private fun emf(ds: DataSource, unit: String, pkg: String): LocalContainerEntityManagerFactoryBean =
-        LocalContainerEntityManagerFactoryBean().apply {
-            dataSource = ds
-            setPackagesToScan(pkg)
-            persistenceUnitName = unit
-            jpaVendorAdapter = HibernateJpaVendorAdapter()
-            setJpaProperties(Properties().apply { setProperty("hibernate.hbm2ddl.auto", "update") })
-        }
-
-    @Bean(name = ["legacyEntityManagerFactory"])
+    @Bean
     @Primary
-    fun legacyEntityManagerFactory(): LocalContainerEntityManagerFactoryBean =
-        emf(legacyDataSource(), "legacy", "com.example.dtx.saga.domain.legacy")
+    fun entityManagerFactoryBuilder(): EntityManagerFactoryBuilder =
+        EntityManagerFactoryBuilder(HibernateJpaVendorAdapter(), { mutableMapOf<String, Any>() }, null)
 
-    @Bean(name = ["newEntityManagerFactory"])
-    fun newEntityManagerFactory(): LocalContainerEntityManagerFactoryBean =
-        emf(newDataSource(), "new", "com.example.dtx.saga.domain.newdb")
-
-    @Bean(name = ["legacyTransactionManager"])
+    @Bean(name = ["profileEntityManagerFactory"])
     @Primary
-    fun legacyTransactionManager(
-        @Qualifier("legacyEntityManagerFactory") emf: EntityManagerFactory,
+    fun profileEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+        builder
+            .dataSource(profileDataSource())
+            .packages("com.example.dtx.saga.domain.profile")
+            .persistenceUnit("profile")
+            .properties(mapOf("hibernate.hbm2ddl.auto" to "update"))
+            .build()
+
+    @Bean(name = ["contactEntityManagerFactory"])
+    fun contactEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+        builder
+            .dataSource(contactDataSource())
+            .packages("com.example.dtx.saga.domain.contact")
+            .persistenceUnit("contact")
+            .properties(mapOf("hibernate.hbm2ddl.auto" to "update"))
+            .build()
+
+    @Bean(name = ["profileTransactionManager"])
+    @Primary
+    fun profileTransactionManager(
+        @Qualifier("profileEntityManagerFactory") emf: EntityManagerFactory,
     ): PlatformTransactionManager = JpaTransactionManager(emf)
 
-    @Bean(name = ["newTransactionManager"])
-    fun newTransactionManager(
-        @Qualifier("newEntityManagerFactory") emf: EntityManagerFactory,
+    @Bean(name = ["contactTransactionManager"])
+    fun contactTransactionManager(
+        @Qualifier("contactEntityManagerFactory") emf: EntityManagerFactory,
     ): PlatformTransactionManager = JpaTransactionManager(emf)
 }
 
 @Configuration
 @EnableJpaRepositories(
-    basePackages = ["com.example.dtx.saga.repository.legacy"],
-    entityManagerFactoryRef = "legacyEntityManagerFactory",
-    transactionManagerRef = "legacyTransactionManager",
+    basePackages = ["com.example.dtx.saga.repository.profile"],
+    entityManagerFactoryRef = "profileEntityManagerFactory",
+    transactionManagerRef = "profileTransactionManager",
 )
-class LegacyJpaConfig
+class ProfileJpaConfig
 
 @Configuration
 @EnableJpaRepositories(
-    basePackages = ["com.example.dtx.saga.repository.newdb"],
-    entityManagerFactoryRef = "newEntityManagerFactory",
-    transactionManagerRef = "newTransactionManager",
+    basePackages = ["com.example.dtx.saga.repository.contact"],
+    entityManagerFactoryRef = "contactEntityManagerFactory",
+    transactionManagerRef = "contactTransactionManager",
 )
-class NewJpaConfig
+class ContactJpaConfig

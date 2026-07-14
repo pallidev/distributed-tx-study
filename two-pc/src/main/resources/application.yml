@@ -6,12 +6,12 @@ spring:
 
 # main(로컬 실행)은 H2 XA. 테스트(@DynamicPropertySource)는 MySQL(Testcontainers) XA 로 덮어쓴다.
 datasource:
-  legacy:
+  profile:
     xa-class: org.h2.jdbcx.JdbcDataSource
-    url: jdbc:h2:mem:legacy;DB_CLOSE_DELAY=-1;MODE=MySQL
-  new:
+    url: jdbc:h2:mem:profile;DB_CLOSE_DELAY=-1;MODE=MySQL
+  contact:
     xa-class: org.h2.jdbcx.JdbcDataSource
-    url: jdbc:h2:mem:newdb;DB_CLOSE_DELAY=-1;MODE=MySQL
+    url: jdbc:h2:mem:contact;DB_CLOSE_DELAY=-1;MODE=MySQL
   user: sa
   password: ""
 

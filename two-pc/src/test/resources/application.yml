@@ -4,22 +4,18 @@ spring:
   jpa:
     open-in-view: false
 
-# main(H2) 기본값 — 테스트는 @DynamicPropertySource 로 MySQL XA 덮어쓰기
 datasource:
-  legacy:
+  profile:
     xa-class: org.h2.jdbcx.JdbcDataSource
-    url: jdbc:h2:mem:legacy;DB_CLOSE_DELAY=-1;MODE=MySQL
-  new:
+    url: jdbc:h2:mem:profile;DB_CLOSE_DELAY=-1;MODE=MySQL
+  contact:
     xa-class: org.h2.jdbcx.JdbcDataSource
-    url: jdbc:h2:mem:newdb;DB_CLOSE_DELAY=-1;MODE=MySQL
+    url: jdbc:h2:mem:contact;DB_CLOSE_DELAY=-1;MODE=MySQL
   user: sa
   password: ""
 
-# 원인 파악용: Atomikos 분산 TX 흐름 + Hibernate SQL 전부 로그
 logging:
   level:
     com.atomikos: TRACE
     org.hibernate.SQL: DEBUG
-    org.hibernate.orm.jdbc.bind: TRACE
-    org.springframework.orm.jpa: DEBUG
     org.springframework.transaction: DEBUG

@@ -18,10 +18,10 @@ fun main(args: Array<String>) {
 class SagaDemoRunner(private val saga: MemberMigrationSaga) {
     @EventListener(ApplicationReadyEvent::class)
     fun run() {
-        val ok = saga.createMember("alice@example.com", "앨리스")
+        val ok = saga.registerMember("앨리스", "alice@example.com", "010-1111-2222")
         println("[SAGA] alice 결과 = $ok")
 
-        val compensated = saga.createMemberThenFail("bob@example.com", "밥")
+        val compensated = saga.registerMemberThenFail("밥", "bob@example.com", "010-9999-9999")
         println("[SAGA] bob 결과(보상 예상) = $compensated")
     }
 }

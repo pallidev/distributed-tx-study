@@ -18,19 +18,23 @@ import java.util.Properties
 import javax.sql.DataSource
 
 /**
- * 2PC 코디네이터(Atomikos/JTA) + 다중 DataSource/EMF.
+ * 2PC 코디네이터(Atomikos/JTA) + 신규 DB 2개(profile/contact).
+ *
+ * 시나리오: 레거시 단일 회원 테이블(컬럼 다수)을 도메인별로 분해 →
+ *  - 신규 DB A (profile): 회원 기본정보
+ *  - 신규 DB B (contact): 회원 연락처/계정
+ * 두 DB 를 한 JTA 트랜잭션(2PC)으로 묶어 한 회원의 분할된 데이터를 원자적으로 쓴다.
  *
  * 핵심: EntityManagerFactoryBuilder.jta(true) 로 Hibernate 가 JTA 글로벌 TX 에 참여해야
- *  persist → flush → XA branch enlist → commit 흐름이 일어난다.
- *  (LocalContainerEntityManagerFactoryBean 직접 생성 시 jta(true) 가 빠지면 insert 자체가 안 된다.)
+ *  persist→flush→XA branch enlist→commit 흐름이 일어난다.
  */
 @Configuration
 @EnableTransactionManagement
 class JtaConfig(
-    @Value("\${datasource.legacy.xa-class}") private val legacyXaClass: String,
-    @Value("\${datasource.legacy.url}") private val legacyUrl: String,
-    @Value("\${datasource.new.xa-class}") private val newXaClass: String,
-    @Value("\${datasource.new.url}") private val newUrl: String,
+    @Value("\${datasource.profile.xa-class}") private val profileXaClass: String,
+    @Value("\${datasource.profile.url}") private val profileUrl: String,
+    @Value("\${datasource.contact.xa-class}") private val contactXaClass: String,
+    @Value("\${datasource.contact.url}") private val contactUrl: String,
     @Value("\${datasource.user:sa}") private val user: String,
     @Value("\${datasource.password:}") private val password: String,
     @Value("\${hibernate.hbm2ddl.auto:update}") private val hbm2ddl: String,
@@ -48,36 +52,35 @@ class JtaConfig(
         }
     }
 
-    @Bean(name = ["legacyDataSource"])
-    fun legacyDataSource(): DataSource = xa(legacyUrl, "legacy", legacyXaClass)
+    @Bean(name = ["profileDataSource"])
+    fun profileDataSource(): DataSource = xa(profileUrl, "profile", profileXaClass)
 
-    @Bean(name = ["newDataSource"])
-    fun newDataSource(): DataSource = xa(newUrl, "newdb", newXaClass)
+    @Bean(name = ["contactDataSource"])
+    fun contactDataSource(): DataSource = xa(contactUrl, "contact", contactXaClass)
 
-    // 다중 DataSource 라 Boot JPA auto-config 가 EntityManagerFactoryBuilder 빈을 안 만들어 주므로 직접 생성.
     @Bean
     @Primary
     fun entityManagerFactoryBuilder(): EntityManagerFactoryBuilder =
         EntityManagerFactoryBuilder(HibernateJpaVendorAdapter(), { mutableMapOf<String, Any>() }, null)
 
     @Primary
-    @Bean(name = ["legacyEntityManagerFactory"])
-    fun legacyEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+    @Bean(name = ["profileEntityManagerFactory"])
+    fun profileEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
         builder
-            .dataSource(legacyDataSource())
-            .packages("com.example.dtx.twopc.domain.legacy")
-            .persistenceUnit("legacy")
-            .jta(true) // ★ Hibernate 가 JTA 글로벌 TX 에 참여
+            .dataSource(profileDataSource())
+            .packages("com.example.dtx.twopc.domain.profile")
+            .persistenceUnit("profile")
+            .jta(true)
             .properties(mapOf("hibernate.hbm2ddl.auto" to hbm2ddl))
             .build()
 
-    @Bean(name = ["newEntityManagerFactory"])
-    fun newEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
+    @Bean(name = ["contactEntityManagerFactory"])
+    fun contactEntityManagerFactory(builder: EntityManagerFactoryBuilder): LocalContainerEntityManagerFactoryBean =
         builder
-            .dataSource(newDataSource())
-            .packages("com.example.dtx.twopc.domain.newdb")
-            .persistenceUnit("new")
-            .jta(true) // ★
+            .dataSource(contactDataSource())
+            .packages("com.example.dtx.twopc.domain.contact")
+            .persistenceUnit("contact")
+            .jta(true)
             .properties(mapOf("hibernate.hbm2ddl.auto" to hbm2ddl))
             .build()
 
@@ -90,16 +93,16 @@ class JtaConfig(
 
 @Configuration
 @EnableJpaRepositories(
-    basePackages = ["com.example.dtx.twopc.repository.legacy"],
-    entityManagerFactoryRef = "legacyEntityManagerFactory",
+    basePackages = ["com.example.dtx.twopc.repository.profile"],
+    entityManagerFactoryRef = "profileEntityManagerFactory",
     transactionManagerRef = "transactionManager",
 )
-class LegacyJpaConfig
+class ProfileJpaConfig
 
 @Configuration
 @EnableJpaRepositories(
-    basePackages = ["com.example.dtx.twopc.repository.newdb"],
-    entityManagerFactoryRef = "newEntityManagerFactory",
+    basePackages = ["com.example.dtx.twopc.repository.contact"],
+    entityManagerFactoryRef = "contactEntityManagerFactory",
     transactionManagerRef = "transactionManager",
 )
-class NewJpaConfig
+class ContactJpaConfig
