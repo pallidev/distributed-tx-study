@@ -56,6 +56,27 @@ distributed-tx-study/
 
 ---
 
+## 📚 학습 경로 (테스트를 이 순서로 읽으면 단계적 학습)
+
+1. **`two-pc/MemberMigrationServiceTest`** (JUnit5 + Testcontainers MySQL XA)
+   - `정상 흐름` → 2PC 로 양쪽 DB 원자적 **커밋**
+   - `롤백 흐름` → 비즈니스 예외 시 양쪽 DB **롤백**
+2. **`saga/MemberMigrationSagaSpec`** (Kotest BehaviorSpec, Given/When/Then)
+   - `① INSERT 정상` → Step1(profile)+Step2(contact) **COMPLETED**
+   - `② INSERT 보상` → Step2 실패 → Step1 **보상(DELETE)**
+   - `③ UPDATE 보상` → Step2 실패 → Step1 **before 이미지로 재 UPDATE**
+
+## 🧪 테스트 도구 — 상황에 따라 분리
+
+| 모듈 | 도구 | 이유 |
+|------|------|------|
+| **saga** | **Kotest BehaviorSpec** | 학습 시나리오를 `Given/When/Then` 로 표현하기 좋음 (H2라 단순) |
+| **two-pc** | **JUnit5 + Testcontainers** (`@DynamicPropertySource`) | 다중 DataSource(XA) URL 을 컨테이너 시작 시점에 주입해야 해서 `@DynamicPropertySource` 가 깔끔. (Kotest + Testcontainers + Spring 동적 프로퍼티 조합은 설정이 과도함) |
+
+> "상황에 따라 도구를 선택한다"는 것 자체가 실무 감각 — Kotest가 학습 시나리오 표현엔 좋지만, 인프라(Testcontainers) 주입이 핵심인 테스트는 JUnit5 `@DynamicPropertySource`가 더 적합.
+
+---
+
 ## 2PC vs Saga 비교
 
 | 구분 | **2PC** (two-pc) | **Saga** (saga) |
