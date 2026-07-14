@@ -6,16 +6,15 @@ import org.slf4j.LoggerFactory
 import org.springframework.stereotype.Service
 
 /**
- * Saga Orchestrator — 회원 분할 저장 시나리오.
+ * Saga Orchestrator — 회원 분할 저장/수정 시나리오.
  *
- * 레거시 단일 회원(컬럼 다수) → 신규 DB 2개(profile/contact) 분할 저장.
- * 단계(각각 독립된 로컬 트랜잭션):
- *  Step 1. profile DB INSERT   (profileTransactionManager)
- *  Step 2. contact DB INSERT   (contactTransactionManager)
+ * ① INSERT 시나리오: registerMember
+ *   Step1(profile INSERT) → Step2(contact INSERT); 실패 시 Step1 보상(profile DELETE)
  *
- * Step 2 가 실패하면 → Step 1 보상 트랜잭션(profile DB DELETE) 으로 되돌린다.
- *  - 블로킹 없이 보상 가능 (2PC 와 달리)
- *  - 단, 일시적으로 profile DB 에만 데이터가 있는 "중간 상태" 노출 (최종 일관성, AP)
+ * ② UPDATE 시나리오: updateMemberNameAndEmail   ← ★ 핵심
+ *   Step1(profile UPDATE name) → before 이미지 보관
+ *   Step2(contact UPDATE email); 실패 시 Step1 보상 = before 이미지로 재 UPDATE
+ *   (UPDATE 보상은 DELETE 로 안 됨 → "이전 값으로 다시 UPDATE")
  */
 @Service
 class MemberMigrationSaga(
@@ -24,31 +23,59 @@ class MemberMigrationSaga(
 ) {
     private val log = LoggerFactory.getLogger(javaClass)
 
+    // ─────────────────────────────────────────────────────────────
+    // ① INSERT 시나리오 + 보상(DELETE)
+    // ─────────────────────────────────────────────────────────────
     fun registerMember(name: String, email: String, phone: String): SagaResult {
-        val profileId = profileSvc.create(name)        // Step 1
-        log.info("[SAGA] Step 1 profile DB INSERT 완료 id={} name={}", profileId, name)
-        try {
-            contactSvc.create(profileId, email, phone) // Step 2
-            log.info("[SAGA] Step 2 contact DB INSERT 완료 profileId={}", profileId)
-            return SagaResult.COMPLETED
+        val profileId = profileSvc.create(name)        // Step 1 INSERT
+        log.info("[SAGA] Step 1 profile INSERT 완료 id={} name={}", profileId, name)
+        return try {
+            contactSvc.create(profileId, email, phone) // Step 2 INSERT
+            log.info("[SAGA] Step 2 contact INSERT 완료 profileId={}", profileId)
+            SagaResult.COMPLETED
         } catch (e: Exception) {
-            log.warn("[SAGA] Step 2 실패 → 보상: profile DB DELETE id={} cause={}", profileId, e.message)
-            profileSvc.compensateDelete(profileId)     // 보상(Step 1 되돌림)
-            return SagaResult.COMPENSATED
+            log.warn("[SAGA] Step 2 실패 → INSERT 보상(profile DELETE) id={} cause={}", profileId, e.message)
+            profileSvc.compensateDelete(profileId)
+            SagaResult.COMPENSATED
         }
     }
 
-    /** 보상 경로 시뮬레이션: Step 2 를 의도적으로 실패. */
     fun registerMemberThenFail(name: String, email: String, phone: String): SagaResult {
         val profileId = profileSvc.create(name)
-        log.info("[SAGA] Step 1 profile DB INSERT 완료 id={} name={}", profileId, name)
-        try {
+        log.info("[SAGA] Step 1 profile INSERT 완료 id={} name={}", profileId, name)
+        return try {
             contactSvc.createThenFail(profileId, email, phone)
-            return SagaResult.COMPLETED
+            SagaResult.COMPLETED
         } catch (e: Exception) {
-            log.warn("[SAGA] 보상 실행: profile DB DELETE id={}", profileId)
+            log.warn("[SAGA] INSERT 보상(profile DELETE) id={}", profileId)
             profileSvc.compensateDelete(profileId)
-            return SagaResult.COMPENSATED
+            SagaResult.COMPENSATED
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────
+    // ② UPDATE 시나리오 + 보상(before 이미지로 재 UPDATE) ★
+    // ─────────────────────────────────────────────────────────────
+    fun updateMemberNameAndEmail(
+        profileId: Long,
+        newName: String,
+        newEmail: String,
+        failContact: Boolean = false,
+    ): SagaResult {
+        // Step 1 UPDATE: profile name 변경 + before 이미지 보관
+        val beforeName = profileSvc.updateName(profileId, newName)
+        log.info("[SAGA] Step 1 profile UPDATE 완료 id={} {}→{} (before={} 보관)", profileId, beforeName, newName, beforeName)
+        return try {
+            // Step 2 UPDATE: contact email 변경
+            if (failContact) contactSvc.updateEmailThenFail(profileId, newEmail)
+            else contactSvc.updateEmail(profileId, newEmail)
+            log.info("[SAGA] Step 2 contact UPDATE 완료 profileId={}", profileId)
+            SagaResult.COMPLETED
+        } catch (e: Exception) {
+            // UPDATE 보상: before 이미지로 재 UPDATE (DELETE 로는 안 됨)
+            log.warn("[SAGA] Step 2 실패 → UPDATE 보상(profile name {}→{}) cause={}", newName, beforeName, e.message)
+            profileSvc.compensateUpdateName(profileId, beforeName)
+            SagaResult.COMPENSATED
         }
     }
 

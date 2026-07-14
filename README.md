@@ -50,6 +50,7 @@ distributed-tx-study/
 | **two-pc** | `registerMemberThenFail` (contact 저장 직전 예외) | 두 DB 모두 롤백(데이터 없음) | `> 롤백 흐름` ✅ |
 | **saga** | `registerMember` | Step1(profile)+Step2(contact) 완료 → COMPLETED | `MemberMigrationSagaTest > 정상 흐름` ✅ |
 | **saga** | `registerMemberThenFail` | Step2 실패 → Step1 보상(profile DELETE) → COMPENSATED, 양쪽 없음 | `> 보상 흐름` ✅ |
+| **saga** | `updateMemberNameAndEmail`(fail) | **UPDATE** Step1(profile name)+Step2(contact email), 실패 시 **before 이미지로 재 UPDATE** | `> UPDATE 보상` ✅ |
 
 > two-pc 테스트는 **실제 MySQL XA**(Testcontainers 컨테이너 2개: profile / contact)로 Atomikos 가 동작한다.
 
@@ -79,7 +80,15 @@ distributed-tx-study/
 ### saga (`MemberMigrationSaga`)
 - 각 단계가 **독립된 로컬 트랜잭션**(`profileTransactionManager` / `contactTransactionManager`)
 - `Step 1(profile INSERT) → Step 2(contact INSERT)`; Step 2 실패 시 **Step 1 보상(profile DELETE)** (테스트로 검증)
+- **UPDATE 보상** (`updateMemberNameAndEmail`): `profile name UPDATE`(before 이미지 보관) → `contact email UPDATE`, 실패 시 **before 이미지로 재 UPDATE** (DELETE 로는 UPDATE 를 되돌릴 수 없음) (테스트로 검증)
 - 블로킹 없이 **보상 가능** → 일시적 중간 상태(profile DB 에만 데이터)를 감수하는 대신 가용성·장애 격리 확보
+
+### 보상 트랜잭션 종류 (★ 핵심)
+| 정방향 | 보상 | 비고 |
+|--------|------|------|
+| **INSERT** | **DELETE** | 생성된 row 제거 (단순) |
+| **UPDATE** | **before 이미지로 재 UPDATE** | 변경 전 값을 보관해두고 그 값으로 되돌림 (DELETE 불가) |
+| **DELETE** | (보상 불가) | 취소 불가능한 연산 → 가장 마지막 단계에 배치해야 |
 
 ---
 
