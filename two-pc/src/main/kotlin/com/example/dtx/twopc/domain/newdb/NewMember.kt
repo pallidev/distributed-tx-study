@@ -1,4 +1,4 @@
-package com.example.dtx.saga.domain
+package com.example.dtx.twopc.domain.newdb
 
 import jakarta.persistence.Entity
 import jakarta.persistence.GeneratedValue
@@ -7,7 +7,7 @@ import jakarta.persistence.Table
 
 @Entity
 @Table(name = "member")
-class LegacyMember(
+class NewMember(
     @Id @GeneratedValue
     var id: Long? = null,
     var email: String,

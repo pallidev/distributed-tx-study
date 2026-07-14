@@ -1,18 +1,15 @@
 package com.example.dtx.saga.service
 
-import com.example.dtx.saga.domain.LegacyMember
-import com.example.dtx.saga.repository.LegacyMemberRepository
+import com.example.dtx.saga.domain.legacy.LegacyMember
+import com.example.dtx.saga.repository.legacy.LegacyMemberRepository
 import org.springframework.stereotype.Service
 import org.springframework.transaction.annotation.Transactional
 
-/**
- * 기존(legacy) DB 작업 — 자체 로컬 트랜잭션(legacyTransactionManager).
- */
+/** 기존(legacy) DB 작업 — 자체 로컬 트랜잭션(legacyTransactionManager). */
 @Service
 class LegacyMemberService(
     private val legacyRepo: LegacyMemberRepository,
 ) {
-    /** Step 2 정방향: 기존 회원 INSERT. */
     @Transactional("legacyTransactionManager")
     fun create(email: String, name: String) {
         legacyRepo.save(LegacyMember(email = email, name = name))
